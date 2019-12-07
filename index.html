@@ -526,7 +526,7 @@ nbFit = train(classe ~ ., data=training, method=&quot;nb&quot;)</code></pre>
 </div>
 <div id="boosting" class="section level1">
 <h1>Boosting</h1>
-<p>The next model explored was Boosting. This produces a greater than 90% prediction success.</p>
+<p>The next model explored was Boosting. This produces a greater than 99% prediction success.</p>
 <pre class="r"><code>boostFit &lt;- train(classe ~ ., method = &quot;gbm&quot;, data = training,
                   verbose = FALSE, trControl = parallelControl)</code></pre>
 <div id="cross-validation" class="section level2">
