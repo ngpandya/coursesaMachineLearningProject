@@ -1,0 +1,261 @@
+---
+title: "Practical Machine Learning: Course Project"
+subtitle: "Weight Lifting Exercise Dataset"
+author: "Rob Willhoft"
+date: "12/07/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(caret)
+require(ggplot2)
+require(parallel)
+require(doParallel)
+require(rattle)
+require(lda)
+require("klaR")
+require(e1071)
+```
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now 
+possible to collect a large amount of data about personal activity 
+relatively inexpensively. These type of devices are part of the quantified 
+self movement – a group of enthusiasts who take measurements about 
+themselves regularly to improve their health, to find patterns in their 
+behavior, or because they are tech geeks. One thing that people regularly do 
+is quantify how much of a particular activity they do, but they rarely 
+quantify how well they do it. In this project, your goal will be to use data 
+from accelerators on the belt, forearm, arm, and dumbbell of 6 
+participants. They were asked to perform barbell lifts correctly and 
+incorrectly in 5 different ways. More information is available from the 
+website here: http://groupware.les.inf.puc-rio.br/har (see the section on 
+the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data was loaded from this link:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+And the test data was loaded with this link:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Acknowledgement
+
+Data is from: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H.
+Qualitative Activity Recognition of Weight Lifting Exercises. 
+Proceedings of 4th International Conference in Cooperation with SIGCHI 
+(Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+**Source**: http://groupware.les.inf.puc-rio.br/har#ixzz67OYDp5fD
+
+I want to acknowledge them as
+being very generous in allowing their data to be used for this kind of assignment.
+
+# Summary
+
+The goal of your project is to predict the manner in which the participants 
+did the exercise. This is the "classe" variable in the training set. This report will talk about:
+
+1. The variables used to predict, including data cleaning.
+2. The method used to build the model.
+3. The use of cross validation to evaluate the model
+4. Estimates of the sample error.
+
+Each step will describe the choices made that led to the final prediction
+model. 
+
+Finally, the prediction model to predict 20 different test cases. Note, as
+good practice requires these are not used in any of the steps outlined.
+
+## Loading Data
+
+The files downloaded from the above links were CSV files and so the following
+code is used to load the taring data into R.
+
+```{r}
+training = read.csv("data/pml-training.csv")
+dim(training)
+testing = read.csv("data/pml-testing.csv")
+dim(testing)
+```
+
+# Cleaning the Data
+
+## Removing Non-Measurement Data
+
+The first five variables in the data set are an index number, participant
+ID, and time stamp information. These are removed.
+
+```{r}
+training <- training[, -c(1,2,3,4,5)]
+testing <- testing[, -c(1,2,3,4,5)]
+```
+
+## Remove NAs
+
+There are 67 variables where the bulk of the data is NA, 19216 of the 19622 
+data samples. This seems excessive for any form of interpolation, so these 
+variables are just removed from the training and testing data sets. 
+
+```{r}
+isNA <- is.na(training)
+table(apply(isNA, 2, sum))
+training <- training[,!apply(isNA, 2, any)]
+testing <- testing[,!apply(isNA, 2, any)]
+```
+
+## Remove Blank Data
+
+There are also variables in the data set that have a large number of blanks.
+The following code uses a threshold of 19000 samples (over 96%) of the 
+data being blank to decide what variables to remove.
+
+```{r}
+isBlank <- apply(training == "",2,sum) > 19000
+training <- training[, !isBlank]
+testing <- testing[, !isBlank]
+```
+
+## Final Data Set
+
+The final data set has 55 variables. All are numeric except the first (`new window`) and the `classe` (last variable). The following variables are included in the data:
+
+```{r}
+names(training)
+```
+
+# Decision Tree
+
+The first model that was explored was based on decision trees. It processed
+quickly, but had fairly poor prediction success on 
+the taring data, less than 50%.
+
+```{r, warning=FALSE}
+library(caret)
+treeFit <- train(classe ~ ., 
+                 method="rpart", 
+                 data=training)
+library(rattle)
+fancyRpartPlot(treeFit$finalModel)
+
+treePred = predict(treeFit, training)
+predTable <- table(treePred, training$classe)
+predTable
+sum(diag(predTable)) / nrow(training)
+```
+
+The first attempt to improve this involved reprocessing the data by adding
+`preProcess = c("center", "scale")` to the `train` function call. This made
+little difference.
+
+## Correlated Predictors
+
+The correlations were calculated using the `cor` function. Eight groups
+were found with 2 to 5 variables in the group. These groups were combined
+with the average of the values. This reduced the number of variables to 41
+(i.e. 22 variables were combined into 8 new variables.)
+Although the decision tree was different, 
+there was very little difference in the prediction success.
+
+# Parallel Processing
+
+The following model fits were very slow in executing, to help with this, 
+parallel processing was enabled. 
+
+## Setup Parallel Processing
+
+```{r}
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # leave one for for OS
+registerDoParallel(cluster)
+parallelControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+```
+
+Reference: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
+
+## Failed Methods due to Processing Complexity
+
+Ultimately, both Random Forest and Naive Bayes failed to produce a result
+in a reasonable time, i.e. less than 1/2 hour, even with parallel processing
+on an Intel i5. The the is included here, but was ultimately abandoned.
+
+### Random Forest
+
+```
+rfFit <- train(classe ~ ., 
+               data=training, 
+               method="rf", 
+               prox=TRUE, 
+               trControl = fitControl)
+randomForest::getTree(rfFit$finalModel, k=2)
+```
+
+### Naive Bayes
+
+```
+library(lda)
+library(klaR)
+library(e1071)
+nbFit = train(classe ~ ., data=training, method="nb")
+```
+
+# Boosting
+
+The next model explored was Boosting. This produces a greater than 90%
+prediction success.
+
+```{r, cache=TRUE, warning=FALSE}
+boostFit <- train(classe ~ ., method = "gbm", data = training,
+                  verbose = FALSE, trControl = parallelControl)
+```
+
+## Cross-Validation
+
+5-fold resampling was done for cross-validation and the results are given
+as part of the model fit below. The accuracy is fairly good from
+0.76 to 0.98.
+
+```{r}
+boostFit
+boostPred = predict(boostFit, training)
+predTable <- table(boostPred, training$classe)
+predTable
+sum(diag(predTable)) / nrow(training)
+```
+
+# Final Prediction of Test values
+
+Finally, the `boostFit` model is used to predict that values of the 
+testing data set.
+
+```{r}
+boostTest = predict(boostFit, testing)
+boostTest
+```
+
+<!-- # Appendix - Correlated Variables -->
+
+<!-- ``` -->
+<!-- M <- abs(cor(training[, -c(1,55)])) -->
+<!-- diag(M) <- 0 -->
+<!-- which(M > 0.8, arr.ind = TRUE) -->
+
+<!-- training$group1 <- apply( training[, 1+c(2,4,5,10,11)], 1, sum) -->
+<!-- training$group2 <- apply( training[, 1+c(3,9,12)], 1, sum) -->
+<!-- training$group3 <- apply( training[, 1+c(19,20)], 1, sum) -->
+<!-- training$group4 <- apply( training[, 1+c(22,25)], 1, sum) -->
+<!-- training$group5 <- apply( training[, 1+c(26,27)], 1, sum) -->
+<!-- training$group6 <- apply( training[, 1+c(29,35)], 1, sum) -->
+<!-- training$group7 <- apply( training[, 1+c(30,37)], 1, sum) -->
+<!-- training$group8 <- apply( training[, 1+c(32,34,46,47)], 1, sum) -->
+<!-- training <- training[, -c(2,4,5,10,11,3,9,12,19,20,22,25,26,27,29,35,30,37,32,34,46,47)] -->
+<!-- ``` -->
